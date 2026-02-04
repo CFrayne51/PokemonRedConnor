@@ -5,6 +5,7 @@ import glob
 import os
 
 from red_gym_env_v2 import RedGymEnv
+from ocr_wrapper import PokemonOCRWrapper
 
 
 def get_latest_checkpoint(folder: str):
@@ -31,10 +32,11 @@ if __name__ == "__main__":
         "gb_path": "/home/di-lab1/PokemonRedExperiments/PokemonRed.gb",
         "debug": False,
         "init_state": None,
+        "randomize_pokemon": False
     }
 
     # 1 env, wrapped as VecEnv (what PPO expects)
-    env = DummyVecEnv([lambda: RedGymEnv(env_config)])
+    env = DummyVecEnv([lambda: PokemonOCRWrapper(RedGymEnv(env_config))])
     print("Env type:", type(env))
 
     

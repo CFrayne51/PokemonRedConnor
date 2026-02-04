@@ -2,6 +2,7 @@ import sys
 from os.path import exists
 from pathlib import Path
 from red_gym_env_v2 import RedGymEnv
+from ocr_wrapper import PokemonOCRWrapper
 from stream_agent_wrapper import StreamWrapper
 from stable_baselines3 import PPO
 from stable_baselines3.common import env_checker
@@ -21,8 +22,9 @@ def make_env(rank, env_conf, seed=0):
     :param rank: (int) index of the subprocess
     """
     def _init():
+        env_raw = RedGymEnv(env_conf)
         env = StreamWrapper(
-            RedGymEnv(env_conf), 
+            PokemonOCRWrapper(env_raw), 
             stream_metadata = { # All of this is part is optional
                 "user": "v2-battle", # choose your own username
                 "env_id": rank, # environment identifier

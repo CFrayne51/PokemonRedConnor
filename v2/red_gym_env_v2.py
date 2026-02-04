@@ -26,6 +26,8 @@ from gymnasium import Env, spaces
 from pyboy.utils import WindowEvent
 
 from global_map import local_to_global, GLOBAL_MAP_SHAPE
+import pokemon_data
+from ocr_wrapper import PokemonOCRWrapper
 
 event_flags_start = 0xD747
 event_flags_end = 0xD87E # expand for SS Anne # old - 0xD7F6 
@@ -42,6 +44,7 @@ class RedGymEnv(Env):
         self.max_steps = config["max_steps"]
         self.save_video = config["save_video"]
         self.fast_video = config["fast_video"]
+        self.randomize_pokemon = config.get("randomize_pokemon", True)
         self.frame_stacks = 3
         #self.save_battle_states = config.get("save_battle_states", False)
         self._prev_battle_flag = False
@@ -103,7 +106,8 @@ class RedGymEnv(Env):
         ]
 
         # load event names (parsed from https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm)
-        with open("events.json") as f:
+        base_dir = Path(__file__).parent
+        with open(base_dir / "events.json") as f:
             event_names = json.load(f)
         self.event_names = event_names
 
@@ -163,6 +167,14 @@ class RedGymEnv(Env):
                 #Dummy transmission fallback: return a generic observation so VecEnv doesn't freeze
                 blank_obs = np.zeros(self.output_shape, dtype=np.uint8)
                 return blank_obs, {"truncated": True}
+
+        # Inject RAM for Random Matchup (If enabled)
+        if self.randomize_pokemon:
+            try:
+                self.inject_ram()
+                self.pyboy.tick(1, True) # Advance frame to update
+            except Exception as e:
+                print(f"[RedGymEnv] RAM Injection Failed: {e}")
 
         #for i in range(500):  # ~500 frames = 8.3 seconds at 60 FPS
         #    self.pyboy.tick(1, True)
@@ -589,6 +601,105 @@ class RedGymEnv(Env):
     #        self.model_frame_writer.close()
     #        self.map_frame_writer.close()
 #
+    
+    def inject_ram(self):
+        # 1. Configuration
+        level = pokemon_data.get_random_level()
+        
+        # 2. Player Injection (wBattleMon + wPartyMon1)
+        # We inject into Battle Mon (Active) AND Party Mon 1 (Storage) to be safe
+        p_data = pokemon_data.get_random_pokemon(level)
+        
+        # Helper to write stats
+        def write_stats(start_addr, stats, hp_curr, hp_max):
+            # HP (Big Endian)
+            self.pyboy.memory[start_addr] = (hp_curr >> 8) & 0xFF
+            self.pyboy.memory[start_addr+1] = hp_curr & 0xFF
+            # Max HP (at start_addr + 0x22 usually, but structure varies slightly)
+            # wBattleMon (D015=HP, D023=MaxHP) -> Gap is 14 bytes
+            # wPartyMon (D16C=HP, D18D=MaxHP)  -> Gap is 33 bytes?
+            # Let's use specific addresses from plan to be precise
+            pass
+
+        # === PLAYER INJECTION ===
+        # wBattleMon (Active)
+        self.pyboy.memory[0xD014] = p_data['species_id']
+        self.pyboy.memory[0xD019] = p_data['types'][0]
+        self.pyboy.memory[0xD01A] = p_data['types'][1]
+        
+        # Moves
+        for i, move_id in enumerate(p_data['moves']):
+             self.pyboy.memory[0xD01C + i] = move_id
+             
+        self.pyboy.memory[0xD022] = level
+        
+        # Stats
+        # HP
+        self.pyboy.memory[0xD015] = (p_data['max_hp'] >> 8) & 0xFF
+        self.pyboy.memory[0xD016] = p_data['max_hp'] & 0xFF
+        self.pyboy.memory[0xD023] = (p_data['max_hp'] >> 8) & 0xFF
+        self.pyboy.memory[0xD024] = p_data['max_hp'] & 0xFF
+        # Atk, Def, Spd, Spec
+        self.pyboy.memory[0xD025] = (p_data['stats']['atk'] >> 8) & 0xFF
+        self.pyboy.memory[0xD026] = p_data['stats']['atk'] & 0xFF
+        self.pyboy.memory[0xD027] = (p_data['stats']['def'] >> 8) & 0xFF
+        self.pyboy.memory[0xD028] = p_data['stats']['def'] & 0xFF
+        self.pyboy.memory[0xD029] = (p_data['stats']['spd'] >> 8) & 0xFF
+        self.pyboy.memory[0xD02A] = p_data['stats']['spd'] & 0xFF
+        self.pyboy.memory[0xD02B] = (p_data['stats']['spec'] >> 8) & 0xFF
+        self.pyboy.memory[0xD02C] = p_data['stats']['spec'] & 0xFF
+        
+        # wPartyMon1 (Sync with BattleMon)
+        self.pyboy.memory[0xD16B] = p_data['species_id']
+        self.pyboy.memory[0xD16C] = (p_data['max_hp'] >> 8) & 0xFF
+        self.pyboy.memory[0xD16D] = p_data['max_hp'] & 0xFF
+        for i, move_id in enumerate(p_data['moves']):
+             self.pyboy.memory[0xD173 + i] = move_id
+        self.pyboy.memory[0xD18D] = (p_data['max_hp'] >> 8) & 0xFF # MaxHP
+        self.pyboy.memory[0xD18E] = p_data['max_hp'] & 0xFF
+        
+        self.pyboy.memory[0xD18F] = (p_data['stats']['atk'] >> 8) & 0xFF
+        self.pyboy.memory[0xD190] = p_data['stats']['atk'] & 0xFF
+        self.pyboy.memory[0xD191] = (p_data['stats']['def'] >> 8) & 0xFF
+        self.pyboy.memory[0xD192] = p_data['stats']['def'] & 0xFF
+        self.pyboy.memory[0xD193] = (p_data['stats']['spd'] >> 8) & 0xFF
+        self.pyboy.memory[0xD194] = p_data['stats']['spd'] & 0xFF
+        self.pyboy.memory[0xD195] = (p_data['stats']['spec'] >> 8) & 0xFF
+        self.pyboy.memory[0xD196] = p_data['stats']['spec'] & 0xFF
+        
+        
+        # === ENEMY INJECTION ===
+        e_data = pokemon_data.get_random_pokemon(level)
+        
+        # wEnemyMon (Active)
+        self.pyboy.memory[0xCFE5] = e_data['species_id']
+        self.pyboy.memory[0xCFEA] = e_data['types'][0]
+        self.pyboy.memory[0xCFEB] = e_data['types'][1]
+        
+        for i, move_id in enumerate(e_data['moves']):
+             self.pyboy.memory[0xCFED + i] = move_id
+             
+        self.pyboy.memory[0xCFE8] = level
+        
+        # Enemy Stats
+        # HP (Current and Max)
+        self.pyboy.memory[0xCFE6] = (e_data['max_hp'] >> 8) & 0xFF
+        self.pyboy.memory[0xCFE7] = e_data['max_hp'] & 0xFF
+        self.pyboy.memory[0xCFF4] = (e_data['max_hp'] >> 8) & 0xFF
+        self.pyboy.memory[0xCFF5] = e_data['max_hp'] & 0xFF
+        
+        # Atk, Def, Spd, Spec
+        self.pyboy.memory[0xCFF6] = (e_data['stats']['atk'] >> 8) & 0xFF
+        self.pyboy.memory[0xCFF7] = e_data['stats']['atk'] & 0xFF
+        self.pyboy.memory[0xCFF8] = (e_data['stats']['def'] >> 8) & 0xFF
+        self.pyboy.memory[0xCFF9] = e_data['stats']['def'] & 0xFF
+        self.pyboy.memory[0xCFFA] = (e_data['stats']['spd'] >> 8) & 0xFF
+        self.pyboy.memory[0xCFFB] = e_data['stats']['spd'] & 0xFF
+        self.pyboy.memory[0xCFFC] = (e_data['stats']['spec'] >> 8) & 0xFF
+        self.pyboy.memory[0xCFFD] = e_data['stats']['spec'] & 0xFF
+        
+        print(f"[RedGymEnv] RAM Injected | Lv.{level} {p_data['name']} vs {e_data['name']}")
+
     def read_m(self, addr):
         #return self.pyboy.get_memory_value(addr)
         return self.pyboy.memory[addr]
