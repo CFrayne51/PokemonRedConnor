@@ -1,7 +1,7 @@
 import sys
 from os.path import exists
 from pathlib import Path
-from red_gym_env_v2 import RedGymEnv
+from red_gym.environment import RedGymEnv
 from stream_agent_wrapper import StreamWrapper
 from stable_baselines3 import PPO
 from stable_baselines3.common import env_checker
@@ -46,7 +46,7 @@ if __name__ == "__main__":
                 'headless': True, 'save_final_state': False, 'early_stop': True,
                 'action_freq': 60, 'max_steps': ep_length, 
                 'print_rewards': True, 'save_video': False, 'fast_video': False, 'session_path': sess_path,
-                'gb_path': '/home/di-lab1/PokemonRedExperiments/PokemonRed.gb', 'debug': False, 'reward_scale': 0.5, 'explore_weight': 0.25
+                'gb_path': 'PokemonRed.gb', 'debug': False, 'reward_scale': 0.5, 'explore_weight': 0.25
             }
     
     print(env_config)

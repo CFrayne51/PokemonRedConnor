@@ -4,7 +4,7 @@ from pathlib import Path
 import glob
 import os
 
-from red_gym_env_v2 import RedGymEnv
+from red_gym.environment import RedGymEnv
 
 
 def get_latest_checkpoint(folder: str):
@@ -28,7 +28,7 @@ if __name__ == "__main__":
         "save_video": True,
         "fast_video": False,
         "session_path": Path("battle_runs"),
-        "gb_path": "/home/di-lab1/PokemonRedExperiments/PokemonRed.gb",
+        "gb_path": "PokemonRed.gb",
         "debug": False,
         "init_state": None,
     }
@@ -39,7 +39,7 @@ if __name__ == "__main__":
 
     
     #Loads specific
-    ckpt = "runs/poke_383254528_steps.zip"
+    ckpt = "runs/poke_383254528_steps"
     #Loads lates checkpoint
     #ckpt = get_earliest_checkpoint("runs")
     if ckpt is None:
