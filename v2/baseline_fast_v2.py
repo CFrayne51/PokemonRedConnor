@@ -49,7 +49,7 @@ if __name__ == "__main__":
                 'action_freq': 60, 'max_steps': ep_length, 
                 'print_rewards': True, 'save_video': True, 'fast_video': True, 'session_path': sess_path,
                 'gb_path': 'PokemonRed.gb', 'debug': True, 'reward_scale': 0.5, 'explore_weight': 0.25,
-                'randomize_pokemon': True
+                'randomize_pokemon': False
             }
     
     print(env_config)
