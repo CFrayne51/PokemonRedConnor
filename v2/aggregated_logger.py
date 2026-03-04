@@ -31,9 +31,15 @@ class GlobalEpisodeLogger(BaseCallback):
                 ep = info["episode"]
                 self.ep_rewards[i] = ep.get("r", 0.0)
                 self.ep_lens[i] = ep.get("l", 0)
-                self.ep_wins[i] = ep.get("w", 0)
-                self.ep_losses[i] = ep.get("loss", 0)
+                # Check for win/loss in episode or top-level info
+                self.ep_wins[i] = ep.get("w", info.get("win", 0))
+                self.ep_losses[i] = ep.get("loss", info.get("loss", 0))
                 self.done_flags[i] = True
+            elif info.get("win") or info.get("loss"):
+                # Fallback for when info is present but 'episode' isn't yet (if ever)
+                self.ep_wins[i] = info.get("win", 0)
+                self.ep_losses[i] = info.get("loss", 0)
+                # Note: we don't have r/l here without the wrapper
 
         # If ALL envs finished their episode, aggregate
         if self.done_flags.all():

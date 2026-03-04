@@ -12,6 +12,7 @@ from skimage.transform import downscale_local_mean
 from gymnasium import Env, spaces
 from pyboy import PyBoy
 from pyboy.utils import WindowEvent
+import os
 
 from .constants import (
     DEFAULT_CONFIG, ESSENTIAL_MAP_LOCATIONS, 
@@ -19,6 +20,8 @@ from .constants import (
 )
 from .memory import PyBoyMemory
 from .rewards import RewardSystem
+from .ocr import GameParser
+from .pokemon_data import MOVES_MAP
 
 class RedGymEnv(Env):
     def __init__(self, config=None):
@@ -26,27 +29,41 @@ class RedGymEnv(Env):
         if config:
             self.config.update(config)
 
-        self.s_path = Path(self.config["session_path"])
-        self.s_path.mkdir(exist_ok=True, parents=True)
-            
         self.headless = self.config["headless"]
         self.action_freq = self.config["action_freq"]
         self.max_steps = self.config["max_steps"]
         self.save_video = self.config["save_video"]
         self.fast_video = self.config["fast_video"]
+        self.randomize_pokemon = self.config.get("randomize_pokemon", True)
         self.frame_stacks = 3
         
-        self.instance_id = str(uuid.uuid4())[:8]
-        
+        # Unique instance ID if not provided in config
+        if "instance_id" not in self.config:
+            self.instance_id = str(uuid.uuid4())[:8]
+
+        # Handle State Directory
+        self.state_dir = Path(self.config.get("state_dir", "v2/battle_states"))
+        self.all_states = [str(s) for s in self.state_dir.glob("*.state")]
+        if not self.all_states:
+             # Fallback to single state if dir is empty/missing
+             base_state = self.config["gb_path"] + ".state"
+             if os.path.exists(base_state):
+                 self.all_states = [base_state]
+
+        self.pyboy = None
+        self._init_pyboy()
+
+        self.s_path = Path(self.config["session_path"])
+        self.s_path.mkdir(exist_ok=True, parents=True)
+            
         # Video writers
         self.full_frame_writer = None
-        
         self.reset_count = 0
         self.step_count = 0
         
-        self._init_pyboy()
         self.memory = PyBoyMemory(self.pyboy)
         self.reward_system = RewardSystem(self.memory, self.config)
+        self.parser = GameParser(self.s_path)
         
         atexit.register(self.close)
         
@@ -86,10 +103,8 @@ class RedGymEnv(Env):
                 "screens": spaces.Box(low=0, high=255, shape=self.output_shape, dtype=np.uint8),
                 "health": spaces.Box(low=0, high=1, shape=(1,)),
                 "level": spaces.Box(low=-1, high=1, shape=(self.enc_freqs,)),
-                "badges": spaces.MultiBinary(8),
-                "events": spaces.MultiBinary((EVENT_FLAGS_END - EVENT_FLAGS_START) * 8),
-                "map": spaces.Box(low=0, high=255, shape=(48, 48, 1), dtype=np.uint8),
-                "recent_actions": spaces.MultiDiscrete([len(self.valid_actions)] * self.frame_stacks)
+                "recent_actions": spaces.MultiDiscrete([len(self.valid_actions)] * self.frame_stacks),
+                "move_ids": spaces.Box(low=0, high=255, shape=(4,), dtype=np.int32)
             }
         )
 
@@ -108,13 +123,28 @@ class RedGymEnv(Env):
     def reset(self, seed=None, options={}):
         self.seed = seed
         
-        # Load State
-        if self.config["init_state"]:
-             with open(self.config["init_state"], "rb") as f:
-                self.pyboy.load_state(f)
+        # Load State - Pick random state from the battle_states folder
+        if self.all_states:
+            state_path = self.np_random.choice(self.all_states)
         else:
-            # Fallback for random testing
-             pass
+            state_path = self.config["gb_path"] + ".state"
+            
+        with open(state_path, "rb") as f:
+            self.pyboy.load_state(f)
+        
+        if self.randomize_pokemon:
+            if self.config.get("debug", False):
+                print(f"[DEBUG][{self.instance_id}] Injecting RAM for reset {self.reset_count}")
+            self.memory.inject_ram()
+            
+            # Wait loop to let the battle transition occur naturally
+            # and let RAM injection "settle"
+            self._wait_for_battle()
+            
+            if self.config.get("debug", False):
+                hp = self.memory.read_hp_fraction()
+                ehp = self.memory.read_enemy_hp_fraction()
+                print(f"[DEBUG][{self.instance_id}] HP: {hp:.2f}, E-HP: {ehp:.2f}")
 
         self.reward_system.reset()
         self.step_count = 0
@@ -152,14 +182,38 @@ class RedGymEnv(Env):
             truncated = True
 
         info = {
-            "stats": self.reward_system.progress_reward
+            "stats": self.reward_system.progress_reward,
+            "win": False,
+            "loss": False,
+            "hp": self.memory.read_hp_fraction(),
+            "enemy_hp": self.memory.read_enemy_hp_fraction()
         }
         
         if terminated or truncated:
+            if info["enemy_hp"] <= 0:
+                info["win"] = True
+            elif info["hp"] <= 0:
+                info["loss"] = True
             self.close_video()
 
         self.step_count += 1
+
         return self._get_obs(), request_reward, terminated, truncated, info
+
+    def _update_agent_stats(self):
+        # Update explore map (basic downscale)
+        x, y, map_n = self.memory.get_pos()
+        if map_n in ESSENTIAL_MAP_LOCATIONS:
+             self.explore_map[y//4, x//4] = 1 
+        
+        # Pull stats from reward system
+        self.agent_stats.append(self.reward_system.progress_reward.copy())
+        self.agent_stats[-1].update({
+            "step": self.step_count,
+            "reset": self.reset_count,
+            "hp": self.memory.read_hp_fraction(),
+            "enemy_hp": self.memory.read_enemy_hp_fraction()
+        })
 
     def _run_action(self, action_idx):
         if self.save_video and self.fast_video:
@@ -192,10 +246,8 @@ class RedGymEnv(Env):
             "screens": self.recent_screens,
             "health": np.array([self.memory.read_hp_fraction()]),
             "level": self.fourier_encode(level_sum),
-            "badges": np.array([int(bit) for bit in f"{self.memory.read_m(0xD356):08b}"], dtype=np.int8),
-            "events": np.zeros(((EVENT_FLAGS_END - EVENT_FLAGS_START) * 8,), dtype=np.int8), # Stub events for now or implement
-            "map": self.dummy_map, 
-            "recent_actions": self.recent_actions
+            "recent_actions": self.recent_actions,
+            "move_ids": np.array(self.memory.read_moves(), dtype=np.int32)
         }
 
     def update_recent_screens(self, cur_screen):
@@ -212,17 +264,27 @@ class RedGymEnv(Env):
     def check_if_done(self):
         # 1. Timeout
         if self.step_count >= self.max_steps - 1:
+            if self.config.get("debug", False): print(f"[DEBUG][{self.instance_id}] Done: Timeout ({self.step_count})")
             return True
         
         # 2. Battle finished (Enemy fainted or We fainted)
-        if self.memory.read_enemy_hp_fraction() <= 0.0:
+        # Note: read_hp_fraction reads the sum of the WHOLE party HP
+        ehp = self.memory.read_enemy_hp_fraction()
+        php = self.memory.read_hp_fraction()
+        
+        if ehp <= 0.0:
+            if self.config.get("debug", False): print(f"[DEBUG][{self.instance_id}] Done: Enemy Fainted (E-HP: {ehp})")
             return True
-        if self.memory.read_hp_fraction() <= 0.0:
+        if php <= 0.0:
+            if self.config.get("debug", False): print(f"[DEBUG][{self.instance_id}] Done: Player Fainted (P-HP: {php})")
             return True
 
         # 3. Not in battle anymore check (after initial delay)
-        if self.step_count > 60:
-             if self.memory.read_m(IN_BATTLE_FLAG) == 0:
+        # If the active pokemon faints and we are prompted to switch, we might still be "in battle"
+        # but if the battle ends (e.g. run away or last mon faints), IN_BATTLE_FLAG goes to 0
+        if self.step_count > 100:
+             if self.memory.read_m(0xD057) == 0: # IN_BATTLE_FLAG
+                 if self.config.get("debug", False): print(f"[DEBUG][{self.instance_id}] Done: Out of Battle (Flag 0)")
                  return True
                  
         return False
@@ -244,6 +306,20 @@ class RedGymEnv(Env):
         if self.full_frame_writer:
             self.full_frame_writer.close()
             self.full_frame_writer = None
+
+    def _wait_for_battle(self):
+        # We wait for the battle flag to be set
+        # Max wait of ~10 seconds (600 frames)
+        max_wait = 600
+        for i in range(max_wait):
+            self.pyboy.tick(1, True)
+            if self.memory.read_m(0xD057) > 0: # IN_BATTLE_FLAG
+                if self.config.get("debug", False):
+                    print(f"[DEBUG][{self.instance_id}] Battle detected at tick {i}")
+                break
+        else:
+            if self.config.get("debug", False):
+                print(f"[DEBUG][{self.instance_id}] Warning: Battle flag not set after {max_wait} ticks")
 
     def close(self):
         self.close_video()

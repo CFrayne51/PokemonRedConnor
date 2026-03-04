@@ -36,7 +36,7 @@ class StreamWrapper(gym.Wrapper):
         self.coord_list.append([x_pos, y_pos, map_n])
 
         if self.stream_step_counter >= self.upload_interval:
-            self.stream_metadata["extra"] = f"coords: {len(self.env.seen_coords)}"
+            self.stream_metadata["extra"] = f"steps: {self.stream_step_counter}"
             self.loop.run_until_complete(
                 self.broadcast_ws_message(
                     json.dumps(

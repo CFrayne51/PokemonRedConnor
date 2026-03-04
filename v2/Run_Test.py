@@ -31,6 +31,7 @@ if __name__ == "__main__":
         "gb_path": "PokemonRed.gb",
         "debug": False,
         "init_state": None,
+        "randomize_pokemon": False
     }
 
     # 1 env, wrapped as VecEnv (what PPO expects)

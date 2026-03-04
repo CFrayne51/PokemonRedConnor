@@ -21,6 +21,7 @@ def make_env(rank, env_conf, seed=0):
     :param rank: (int) index of the subprocess
     """
     def _init():
+        import gymnasium as gym
         env = StreamWrapper(
             RedGymEnv(env_conf), 
             stream_metadata = { # All of this is part is optional
@@ -30,6 +31,7 @@ def make_env(rank, env_conf, seed=0):
                 "extra": "", # any extra text you put here will be displayed
             }
         )
+        env = gym.wrappers.RecordEpisodeStatistics(env)
         env.reset(seed=(seed + rank))
         return env
     set_random_seed(seed)
@@ -45,13 +47,26 @@ if __name__ == "__main__":
     env_config = {
                 'headless': True, 'save_final_state': False, 'early_stop': True,
                 'action_freq': 60, 'max_steps': ep_length, 
-                'print_rewards': True, 'save_video': False, 'fast_video': False, 'session_path': sess_path,
-                'gb_path': 'PokemonRed.gb', 'debug': False, 'reward_scale': 0.5, 'explore_weight': 0.25
+                'print_rewards': True, 'save_video': True, 'fast_video': True, 'session_path': sess_path,
+                'gb_path': 'PokemonRed.gb', 'debug': True, 'reward_scale': 0.5, 'explore_weight': 0.25,
+                'randomize_pokemon': True
             }
     
     print(env_config)
     
-    num_cpu = 64 # Also sets the number of episodes per training iteration
+    num_cpu = 16 # Also sets the number of episodes per training iteration
+    
+    # Quick Smoke Test if debug is on
+    if env_config.get("debug", False):
+        print("\n[DEBUG] Running modular environment smoke test...")
+        test_env = make_env(0, env_config)()
+        # Reset to get obs
+        obs, _ = test_env.reset()
+        print(f"[DEBUG] Smoke test observation keys: {obs.keys()}")
+        print(f"[DEBUG] Move IDs from RAM: {obs['move_ids']}")
+        test_env.close()
+        print("[DEBUG] Smoke test complete.\n")
+
     env = SubprocVecEnv([make_env(i, env_config) for i in range(num_cpu)])
     
     checkpoint_callback = CheckpointCallback(save_freq=ep_length//2, save_path="runs", name_prefix="poke")
