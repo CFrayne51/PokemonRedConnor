@@ -61,9 +61,18 @@ if __name__ == "__main__":
         print("\n[DEBUG] Running modular environment smoke test...")
         test_env = make_env(0, env_config)()
         # Reset to get obs
-        obs, _ = test_env.reset()
+        obs, info = test_env.reset()
+        print(f"[DEBUG] Smoke test starting state: {getattr(test_env.unwrapped, 'last_state_path', 'unknown')}")
         print(f"[DEBUG] Smoke test observation keys: {obs.keys()}")
         print(f"[DEBUG] Move IDs from RAM: {obs['move_ids']}")
+        
+        # Run a few steps to get a reward
+        total_reward = 0
+        for _ in range(5):
+            obs, reward, terminated, truncated, info = test_env.step(test_env.action_space.sample())
+            total_reward += reward
+        
+        print(f"[DEBUG] Smoke test total reward (5 steps): {total_reward}")
         test_env.close()
         print("[DEBUG] Smoke test complete.\n")
 

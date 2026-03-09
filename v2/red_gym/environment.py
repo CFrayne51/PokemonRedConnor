@@ -128,19 +128,13 @@ class RedGymEnv(Env):
             state_path = self.np_random.choice(self.all_states)
         else:
             state_path = self.config["gb_path"] + ".state"
+        
+        self.last_state_path = state_path
             
         with open(state_path, "rb") as f:
             self.pyboy.load_state(f)
         
         if self.randomize_pokemon:
-            if self.config.get("debug", False):
-                print(f"[DEBUG][{self.instance_id}] Injecting RAM for reset {self.reset_count}")
-            self.memory.inject_ram()
-            
-            # Wait loop to let the battle transition occur naturally
-            # and let RAM injection "settle"
-            self._wait_for_battle()
-            
             if self.config.get("debug", False):
                 hp = self.memory.read_hp_fraction()
                 ehp = self.memory.read_enemy_hp_fraction()
@@ -264,7 +258,8 @@ class RedGymEnv(Env):
     def check_if_done(self):
         # 1. Timeout
         if self.step_count >= self.max_steps - 1:
-            if self.config.get("debug", False): print(f"[DEBUG][{self.instance_id}] Done: Timeout ({self.step_count})")
+            if self.config.get("debug", False): 
+                print(f"[DEBUG][{self.instance_id}] Done: Timeout ({self.step_count}) | Start: {self.last_state_path} | Reward: {self.reward_system.total_reward:.2f}")
             return True
         
         # 2. Battle finished (Enemy fainted or We fainted)
@@ -273,10 +268,12 @@ class RedGymEnv(Env):
         php = self.memory.read_hp_fraction()
         
         if ehp <= 0.0:
-            if self.config.get("debug", False): print(f"[DEBUG][{self.instance_id}] Done: Enemy Fainted (E-HP: {ehp})")
+            if self.config.get("debug", False): 
+                print(f"[DEBUG][{self.instance_id}] Done: Enemy Fainted (E-HP: {ehp:.2f}) | Start: {self.last_state_path} | Reward: {self.reward_system.total_reward:.2f}")
             return True
         if php <= 0.0:
-            if self.config.get("debug", False): print(f"[DEBUG][{self.instance_id}] Done: Player Fainted (P-HP: {php})")
+            if self.config.get("debug", False): 
+                print(f"[DEBUG][{self.instance_id}] Done: Player Fainted (P-HP: {php:.2f}) | Start: {self.last_state_path} | Reward: {self.reward_system.total_reward:.2f}")
             return True
 
         # 3. Not in battle anymore check (after initial delay)
@@ -284,7 +281,8 @@ class RedGymEnv(Env):
         # but if the battle ends (e.g. run away or last mon faints), IN_BATTLE_FLAG goes to 0
         if self.step_count > 100:
              if self.memory.read_m(0xD057) == 0: # IN_BATTLE_FLAG
-                 if self.config.get("debug", False): print(f"[DEBUG][{self.instance_id}] Done: Out of Battle (Flag 0)")
+                 if self.config.get("debug", False): 
+                     print(f"[DEBUG][{self.instance_id}] Done: Out of Battle (Flag 0) | Start: {self.last_state_path} | Reward: {self.reward_system.total_reward:.2f}")
                  return True
                  
         return False

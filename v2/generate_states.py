@@ -43,15 +43,21 @@ def generate_states(num_states, output_dir, gb_path="PokemonRed.gb", state_dir="
             
         print(f"Generating state {i+1}/{num_states} ...", end="", flush=True)
         
-        # Inject random pokemon into RAM
-        memory.inject_ram()
-        
-        # Wait for the transition
+        # 1. Wait for the battle transition to settle first
+        # This ensures the game's internal initialization (which overwrites RAM) is finished.
         success = wait_for_battle(pyboy, memory)
+        
         if not success:
             print(" [WARNING] Battle did not start within timeout. State might be invalid.")
-        else:
-            print(" [OK]")
+            continue
+
+        # 2. NOW inject the random pokemon into the established battle RAM
+        memory.inject_ram()
+        
+        # 3. Give it a few frames to process the RAM change
+        pyboy.tick(60, True)
+        
+        print(" [OK]")
             
         # Save the new state
         save_path = out_dir / f"random_state_{i:04d}.state"

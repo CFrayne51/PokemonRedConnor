@@ -22,7 +22,7 @@ class PyBoyMemory:
         hp_sum = sum([self.read_short(add) for add in HP_ADDRS])
         max_hp_sum = sum([self.read_short(add) for add in MAX_HP_ADDRS])
         max_hp_sum = max(max_hp_sum, 1)
-        return hp_sum / max_hp_sum
+        return min(1.0, max(0.0, hp_sum / max_hp_sum))
 
     def read_enemy_hp_fraction(self):
         # Number of enemy Pokémon in the party
@@ -34,7 +34,7 @@ class PyBoyMemory:
         max_hp_sum = max(max_hp_sum, 1)
         
         # print(f"[DEBUG-MEM] E-Party Count: {n}, HP Sum: {hp_sum}, MaxHP Sum: {max_hp_sum}")
-        return hp_sum / max_hp_sum
+        return min(1.0, max(0.0, hp_sum / max_hp_sum))
 
     def read_party(self):
         return [self.read_m(addr) for addr in PARTY_TYPE_ADDRS]
