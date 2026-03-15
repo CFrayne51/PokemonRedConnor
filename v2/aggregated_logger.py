@@ -28,18 +28,23 @@ class GlobalEpisodeLogger(BaseCallback):
 
         for i, info in enumerate(infos):
             if "episode" in info:
-                ep = info["episode"]
-                self.ep_rewards[i] = ep.get("r", 0.0)
-                self.ep_lens[i] = ep.get("l", 0)
-                # Check for win/loss in episode or top-level info
-                self.ep_wins[i] = ep.get("w", info.get("win", 0))
-                self.ep_losses[i] = ep.get("loss", info.get("loss", 0))
-                self.done_flags[i] = True
-            elif info.get("win") or info.get("loss"):
-                # Fallback for when info is present but 'episode' isn't yet (if ever)
-                self.ep_wins[i] = info.get("win", 0)
-                self.ep_losses[i] = info.get("loss", 0)
-                # Note: we don't have r/l here without the wrapper
+                if not self.done_flags[i]:
+                    ep = info["episode"]
+                    
+                    # Robust check for win/loss
+                    win_val = info.get("win", False) or info.get("won", 0) == 1
+                    if not win_val and "terminal_info" in info:
+                        win_val = info["terminal_info"].get("win", False) or info["terminal_info"].get("won", 0) == 1
+                        
+                    loss_val = info.get("loss", False)
+                    if not loss_val and "terminal_info" in info:
+                        loss_val = info["terminal_info"].get("loss", False)
+
+                    self.ep_rewards[i] = ep.get("r", 0.0)
+                    self.ep_lens[i] = ep.get("l", 0)
+                    self.ep_wins[i] = 1 if win_val else 0
+                    self.ep_losses[i] = 1 if loss_val else 0
+                    self.done_flags[i] = True
 
         # If ALL envs finished their episode, aggregate
         if self.done_flags.all():

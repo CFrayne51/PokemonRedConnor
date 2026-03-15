@@ -21,7 +21,7 @@ from .constants import (
 from .memory import PyBoyMemory
 from .rewards import RewardSystem
 from .ocr import GameParser
-from .pokemon_data import MOVES_MAP
+from .pokemon_data import MOVES_MAP, MOVES_INFO
 
 class RedGymEnv(Env):
     def __init__(self, config=None):
@@ -63,7 +63,6 @@ class RedGymEnv(Env):
         
         self.memory = PyBoyMemory(self.pyboy)
         self.reward_system = RewardSystem(self.memory, self.config)
-        self.parser = GameParser(self.s_path)
         
         atexit.register(self.close)
         
@@ -104,7 +103,10 @@ class RedGymEnv(Env):
                 "health": spaces.Box(low=0, high=1, shape=(1,)),
                 "level": spaces.Box(low=-1, high=1, shape=(self.enc_freqs,)),
                 "recent_actions": spaces.MultiDiscrete([len(self.valid_actions)] * self.frame_stacks),
-                "move_ids": spaces.Box(low=0, high=255, shape=(4,), dtype=np.int32)
+                "move_ids": spaces.Box(low=0, high=255, shape=(4,), dtype=np.int32),
+                "pokemon_types": spaces.Box(low=0, high=255, shape=(2,), dtype=np.int32),
+                "enemy_types": spaces.Box(low=0, high=255, shape=(2,), dtype=np.int32),
+                "move_types": spaces.Box(low=0, high=255, shape=(4,), dtype=np.int32)
             }
         )
 
@@ -123,8 +125,10 @@ class RedGymEnv(Env):
     def reset(self, seed=None, options={}):
         self.seed = seed
         
-        # Load State - Pick random state from the battle_states folder
-        if self.all_states:
+        # Load State - Use init_state if provided, otherwise pick random from the battle_states folder
+        if self.config.get("init_state") is not None:
+            state_path = self.config["init_state"]
+        elif self.all_states:
             state_path = self.np_random.choice(self.all_states)
         else:
             state_path = self.config["gb_path"] + ".state"
@@ -241,7 +245,10 @@ class RedGymEnv(Env):
             "health": np.array([self.memory.read_hp_fraction()]),
             "level": self.fourier_encode(level_sum),
             "recent_actions": self.recent_actions,
-            "move_ids": np.array(self.memory.read_moves(), dtype=np.int32)
+            "move_ids": np.array(self.memory.read_moves(), dtype=np.int32),
+            "pokemon_types": np.array(self.memory.read_battle_types(), dtype=np.int32),
+            "enemy_types": np.array(self.memory.read_enemy_types(), dtype=np.int32),
+            "move_types": np.array([MOVES_INFO.get(m, {"type": 0x00})["type"] for m in self.memory.read_moves()], dtype=np.int32)
         }
 
     def update_recent_screens(self, cur_screen):

@@ -13,6 +13,7 @@ class RewardSystem:
         self.last_own_hp = 1.0
         self.last_enemy_hp = 1.0
         self.total_reward = 0.0
+        self.cumulative_enemy_dmg = 0.0
 
     def reset(self):
         self.total_healing_rew = 0
@@ -20,15 +21,12 @@ class RewardSystem:
         self.died_count = 0
         self.last_own_hp = self.memory.read_hp_fraction()
         self.last_enemy_hp = self.memory.read_enemy_hp_fraction()
+        self.cumulative_enemy_dmg = 0.0
         self.total_reward = 0.0
         
+        self.prev_party_size = self.memory.read_party_size()
+        
         # Initial reward calculation to set baseline
-        self.update_reward(step_count=0, max_steps=1000)
-        self.total_reward = 0 # Reset total reward after initialization if needed, strictly we might want to keep the initial state reward? 
-        # Actually in original code:
-        # self.progress_reward = self.get_game_state_reward()
-        # self.total_reward = sum([val for _, val in self.progress_reward.items()])
-        # So yes, we calculate it once.
         self.progress_reward = self.get_game_state_reward(0, 1000)
         self.total_reward = sum(self.progress_reward.values())
 
@@ -68,14 +66,14 @@ class RewardSystem:
         enemy_frac = self.memory.read_enemy_hp_fraction()
 
         # Fractional damage since last step
-        dmg_to_enemy = max(0.0, self.last_enemy_hp - enemy_frac)
-        # dmg_to_self = max(0.0, self.last_own_hp - own_frac) # Unused in shaped calculation in original
+        dmg_this_step = max(0.0, self.last_enemy_hp - enemy_frac)
+        self.cumulative_enemy_dmg += dmg_this_step
 
         # Convert fractional damage to reward
         dmg_scale = 100.0
         heal_bonus = self.total_healing_rew * 5.0
 
-        shaped = (dmg_scale * dmg_to_enemy + heal_bonus)
+        shaped = (dmg_scale * self.cumulative_enemy_dmg + heal_bonus)
 
         is_timeout = (step_count >= max_steps - 1)
         if not is_timeout:

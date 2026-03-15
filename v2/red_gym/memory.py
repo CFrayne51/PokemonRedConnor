@@ -155,3 +155,11 @@ class PyBoyMemory:
     def read_enemy_moves(self):
         # wEnemyMonMoves = 0xCFED (4 bytes)
         return [self.read_m(0xCFED + i) for i in range(4)]
+
+    def read_battle_types(self):
+        # wBattleMonType1 = 0xD019, wBattleMonType2 = 0xD01A
+        return [self.read_m(0xD019), self.read_m(0xD01A)]
+
+    def read_enemy_types(self):
+        # wEnemyMonType1 = 0xCFEA, wEnemyMonType2 = 0xCFEB
+        return [self.read_m(0xCFEA), self.read_m(0xCFEB)]
