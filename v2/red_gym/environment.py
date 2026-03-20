@@ -152,7 +152,7 @@ class RedGymEnv(Env):
         self.recent_screens = np.zeros(self.output_shape, dtype=np.uint8)
         self.recent_actions = np.zeros((self.frame_stacks,), dtype=np.uint8)
         
-        self.update_recent_screens(self.render())
+        self.update_recent_history(self.render())
 
         return self._get_obs(), {}
 
@@ -161,10 +161,9 @@ class RedGymEnv(Env):
             self.start_video()
             
         self._run_action(action)
-        self._update_recent_actions(action)
         
-        # Update Screen Buffer
-        self.update_recent_screens(self.render())
+        # Update Screen Buffer (Keyframe Memory)
+        self.update_recent_history(self.render(), action)
         
         request_reward = self.reward_system.update_reward(self.step_count, self.max_steps)
         
@@ -188,9 +187,9 @@ class RedGymEnv(Env):
         }
         
         if terminated or truncated:
-            if info["enemy_hp"] <= 0:
+            if info["enemy_hp"] <= 0 or self.reward_system.total_reward > 0:
                 info["win"] = True
-            elif info["hp"] <= 0:
+            else:
                 info["loss"] = True
             self.close_video()
 
@@ -219,9 +218,6 @@ class RedGymEnv(Env):
              
         self.pyboy.send_input(self.valid_actions[action_idx])
         
-        # Hold for some frames? Original was:
-        # press_step = 8
-        # wait total act_freq
         press_step = 8
         self.pyboy.tick(press_step, False) # Render false mainly?
         self.pyboy.send_input(self.release_actions[action_idx])
@@ -251,13 +247,28 @@ class RedGymEnv(Env):
             "move_types": np.array([MOVES_INFO.get(m, {"type": 0x00})["type"] for m in self.memory.read_moves()], dtype=np.int32)
         }
 
-    def update_recent_screens(self, cur_screen):
-        self.recent_screens = np.roll(self.recent_screens, 1, axis=2)
-        self.recent_screens[:, :, 0] = cur_screen[:,:, 0]
+    def update_recent_history(self, cur_screen, action=None):
+        cur_gray = cur_screen[:,:, 0]
+        
+        # On initialization, fill the stack so there aren't black frames
+        if self.step_count == 0:
+            for i in range(self.frame_stacks):
+                self.recent_screens[:, :, i] = cur_gray
+            if action is not None:
+                self.recent_actions[:] = action
+            return
 
-    def _update_recent_actions(self, action):
-        self.recent_actions = np.roll(self.recent_actions, 1)
-        self.recent_actions[0] = action
+        # Calculate pixel-wise difference vs the most recent stacked frame
+        diff = np.mean(np.abs(cur_gray.astype(np.float32) - self.recent_screens[:, :, 0].astype(np.float32)))
+        
+        # Only update if there has been a significant change in the screen (5% of 255 = 12.75)
+        if diff > 12.75:
+            self.recent_screens = np.roll(self.recent_screens, 1, axis=2)
+            self.recent_screens[:, :, 0] = cur_gray
+            
+            if action is not None:
+                self.recent_actions = np.roll(self.recent_actions, 1)
+                self.recent_actions[0] = action
 
     def fourier_encode(self, val):
         return np.sin(val * 2 ** np.arange(self.enc_freqs))

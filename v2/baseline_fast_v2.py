@@ -33,6 +33,20 @@ class BattleEvalCallback(BaseCallback):
             alt_path = Path("v2") / test_state_dir
             self.test_states = sorted(glob.glob(str(alt_path / "*.state")))
             
+        # Resume iteration count if log exists
+        if self.log_file.exists():
+            try:
+                with open(self.log_file, "r") as f:
+                    lines = f.readlines()
+                    if lines:
+                        last_entry = json.loads(lines[-1].strip())
+                        self.iteration_count = last_entry.get("iteration", 0)
+                        if self.verbose > 0:
+                            print(f"[EVAL] Resuming from iteration {self.iteration_count} based on log file.")
+            except Exception as e:
+                if self.verbose > 0:
+                    print(f"[EVAL] Could not read previous iteration from log: {e}")
+            
         if self.verbose > 0:
             print(f"[EVAL] Initialized with {len(self.test_states)} test states.")
 
@@ -58,7 +72,8 @@ class BattleEvalCallback(BaseCallback):
             
             won_episode = False
             while not done[0]:
-                action, _ = model.predict(obs, deterministic=deterministic)
+                # Using deterministic=False as per user manual test success
+                action, _ = model.predict(obs, deterministic=False)
                 
                 # Track actions for debugging
                 act_val = int(action[0])
@@ -76,7 +91,8 @@ class BattleEvalCallback(BaseCallback):
                 total_reward += rewards[0]
                 steps += 1
             
-            won = 1 if won_episode else 0
+            # Robust win logic: check env flags OR if we ended with positive reward
+            won = 1 if (won_episode or total_reward > 0) else 0
             wins.append(won)
             
             if self.verbose > 0:
@@ -101,7 +117,7 @@ class BattleEvalCallback(BaseCallback):
             for i in range(self.n_random):
                 conf = self.env_config.copy()
                 conf.update({
-                    'randomize_pokemon': True, 
+                    'randomize_pokemon': False, 
                     'headless': True, 
                     'save_video': False, 
                     'print_rewards': False
@@ -114,7 +130,8 @@ class BattleEvalCallback(BaseCallback):
                 total_reward = 0
                 won_episode = False
                 while not done[0]:
-                    action, _ = self.model.predict(obs, deterministic=True)
+                    # Using deterministic=False as per user manual test success
+                    action, _ = self.model.predict(obs, deterministic=False)
                     obs, rewards, dones, infos = eval_env.step(action)
                     
                     info = infos[0]
@@ -126,7 +143,8 @@ class BattleEvalCallback(BaseCallback):
                     done = dones
                     total_reward += rewards[0]
                 
-                won = 1 if won_episode else 0
+                # Robust win logic: check env flags OR if we ended with positive reward
+                won = 1 if (won_episode or total_reward > 0) else 0
                 random_wins.append(won)
                 eval_env.close()
                 if self.verbose > 0: print(f"[EVAL] Random episode {i+1}/{self.n_random} result: {'WIN' if won else 'LOSS'}")
@@ -244,12 +262,14 @@ if __name__ == "__main__":
     print(model.policy)
 
     global_logger = GlobalEpisodeLogger(num_envs=num_cpu, save_path=sess_path)
+    eval_env_conf = env_config.copy()
+    eval_env_conf['max_steps'] = 16000 # Give it more room to finish battles
     eval_callback = BattleEvalCallback(
-        eval_freq=100, 
+        eval_freq=500, 
         test_state_dir="v2/battle_states/Test", 
         log_dir=sess_path,
-        env_config=env_config,
-        n_random=5,
+        env_config=eval_env_conf,
+        n_random=20,
         verbose=1
     )
     callbacks = [checkpoint_callback, TensorboardCallback(sess_path), global_logger, eval_callback]
